@@ -1,5 +1,5 @@
 """
-    VK to OpenVK bridge version 0.0.4
+    VK to OpenVK bridge version 0.0.5
     Copyright (C) 2024  TendingStream73
 
     This program is free software: you can redistribute it and/or modify
@@ -24,6 +24,7 @@ from starlette.requests import Request
 import httpx
 from starlette.responses import StreamingResponse
 from starlette.background import BackgroundTask
+from json import loads, dumps
 
 app = FastAPI()
 methods = APIRouter(prefix="/method")
@@ -226,9 +227,12 @@ app.include_router(methods)
 async def token_req(request: Request):
     url = httpx.URL(path="/token", query=request.url.query.encode("utf-8"))
     client = httpx.AsyncClient(base_url="https://ovk.to")
+    c = loads(await request.body())
+    c['secret'] = '123'
+    c = dumps(c, indent=4)
     rp_req = client.build_request(request.method, url,
                                   headers=request.headers.raw,
-                                  content=await request.body())
+                                  content=c)
     rp_resp = await client.send(rp_req, stream=True)
     return StreamingResponse(
         rp_resp.aiter_raw(),
