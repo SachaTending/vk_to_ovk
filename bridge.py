@@ -1,5 +1,5 @@
 """
-    VK to OpenVK bridge version 0.0.7
+    VK to OpenVK bridge version 0.0.8
     Copyright (C) 2024  TendingStream73
 
     This program is free software: you can redistribute it and/or modify
@@ -17,7 +17,7 @@
 
 """
 
-from fastapi import FastAPI, APIRouter, Form
+from fastapi import FastAPI, APIRouter, Form, Query
 from httpx import get, post
 from loguru import logger
 from starlette.requests import Request
@@ -25,6 +25,10 @@ import httpx
 from starlette.responses import StreamingResponse, Response
 from starlette.background import BackgroundTask
 from json import loads, dumps
+from os import urandom
+from base64 import b64encode
+
+INSTANCE_DIVIDER = ":"
 
 app = FastAPI()
 methods = APIRouter(prefix="/method")
@@ -45,21 +49,31 @@ class LongPoll(TypedDict):
     ts: int
     key: str
     server: str
-
+def extract_instance(inp: str) -> str:
+    s = inp.split(INSTANCE_DIVIDER)
+    if len(s) == 1:
+        return "ovk.to", inp  # no instance specified
+    else:
+        ins = s[0]
+        del s[0]
+        return ins, INSTANCE_DIVIDER.join(s) # instance is specified
 def get_user(token: str) -> UserInfo:
-    return post(f"https://ovk.to/method/Users.get?access_token={token}&fields=photo_100,photo_50", data={'access_token': token}).json()['response'][0]
+    ins, token = extract_instance(token)
+    return post(f"https://{ins}/method/Users.get?access_token={token}&fields=photo_100,photo_50", data={'access_token': token}).json()['response'][0]
 
 def get_longpoll(token: str) -> LongPoll:
-    return get(f"https://ovk.to/method/messages.getLongPollServer?access_token={token}").json()['response']
+    ins, token = extract_instance(token)
+    return get(f"https://{ins}/method/messages.getLongPollServer?access_token={token}").json()['response']
 
 def kw_to_dict(k) -> dict:
-    print(k)
+    #print(k)
     return k
 
 def get_api(method: str, token: str, uagent: str="", **kwargs) -> dict:
     kwargs = kw_to_dict(kwargs)
-    r =  post(f"https://ovk.to/method/{method}?access_token={token}", headers={"user-agent": uagent}, data=kwargs).json()
-    print(r)
+    ins, token = extract_instance(token)
+    r =  post(f"https://{ins}/method/{method}?access_token={token}", headers={"user-agent": uagent}, data=kwargs).json()
+    #print(r)
     return r
 
 @methods.post("/execute.getCommentsNew")
@@ -230,28 +244,36 @@ def getnewsfeed(count: Annotated[int, Form()], start_from: Annotated[int, Form()
         else:
             if not (author_id in uids): uids.append(str(author_id))
     users = get_api("users.get", access_token, user_ids=",".join(uids), fields="photo_50,sex,photo_100,last_seen")
-    groups = get_api("groups.getById", access_token, group_ids=",".join(gids), fields="photo_50,verified,photo_100")
     nf['response']['profiles'] = users['response']
-    nf['response']['groups'] = groups['response']
+    if len(gids) > 0:
+        try:
+            groups = get_api("groups.getById", access_token, group_ids=",".join(gids), fields="photo_50,verified,photo_100")
+            nf['response']['groups'] = groups['response']
+        except:
+            nf["response"]['groups'] = get_api("groups.getById", access_token, groups_id=",".join(gids), fields="photo_50,verified,photo_100")['response']
     return nf
 
 app.include_router(methods)
 
+@app.get("/token")
+@logger.catch
 async def token_req(request: Request):
-    url = httpx.URL(path="/token", query=request.url.query.encode("utf-8"))
-    client = httpx.AsyncClient(base_url="https://ovk.to")
-    rp_req = client.build_request(request.method, url,
-                                  headers=request.headers.raw,
-                                  content=await request.body())
+    uagent = request.headers['User-Agent']
+    params = {
+        "username": request.query_params['username'],
+        "password": request.query_params['password'],
+        "grant_type": "password"
+    }
+    instance, params['username'] = extract_instance(params['username'])
+    #print(params)
+    client = httpx.AsyncClient()
+    rp_req = client.build_request("POST", httpx.URL(f"https://{instance}/token"),
+                                  data=params, headers={"User-Agent": uagent})
     rp_resp = await client.send(rp_req)
-    c = loads(await rp_resp.content)
-    c['secret'] = '123'
-    c = dumps(c, indent=4)
-    return Response(
-        c,
-        status_code=rp_resp.status_code,
-        headers=rp_resp.headers,
-    )
-
-app.add_route("/token",
-              token_req, ["GET", "POST"])
+    c: dict = loads(rp_resp.content)
+    if c.get("access_token", None) != None:
+        c['secret'] = b64encode(urandom(16)).decode()
+        # Extract instance from login
+        c['access_token'] = f"{instance}{INSTANCE_DIVIDER}{c['access_token']}"
+    print(c)
+    return c
