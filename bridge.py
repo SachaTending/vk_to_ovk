@@ -1,5 +1,5 @@
 """
-    VK to OpenVK bridge version 0.0.5
+    VK to OpenVK bridge version 0.0.6
     Copyright (C) 2024  TendingStream73
 
     This program is free software: you can redistribute it and/or modify
@@ -22,7 +22,7 @@ from httpx import get, post
 from loguru import logger
 from starlette.requests import Request
 import httpx
-from starlette.responses import StreamingResponse
+from starlette.responses import StreamingResponse, Response
 from starlette.background import BackgroundTask
 from json import loads, dumps
 
@@ -227,18 +227,17 @@ app.include_router(methods)
 async def token_req(request: Request):
     url = httpx.URL(path="/token", query=request.url.query.encode("utf-8"))
     client = httpx.AsyncClient(base_url="https://ovk.to")
-    c = loads(await request.body())
-    c['secret'] = '123'
-    c = dumps(c, indent=4)
     rp_req = client.build_request(request.method, url,
                                   headers=request.headers.raw,
-                                  content=c)
-    rp_resp = await client.send(rp_req, stream=True)
-    return StreamingResponse(
-        rp_resp.aiter_raw(),
+                                  content=await request.body())
+    rp_resp = await client.send(rp_req)
+    c = loads(await rp_resp.content)
+    c['secret'] = '123'
+    c = dumps(c, indent=4)
+    return Response(
+        c,
         status_code=rp_resp.status_code,
         headers=rp_resp.headers,
-        background=BackgroundTask(rp_resp.aclose),
     )
 
 app.add_route("/token",
