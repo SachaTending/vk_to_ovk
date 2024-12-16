@@ -1,5 +1,5 @@
 """
-    VK to OpenVK bridge version 0.0.6
+    VK to OpenVK bridge version 0.0.7
     Copyright (C) 2024  TendingStream73
 
     This program is free software: you can redistribute it and/or modify
@@ -220,6 +220,19 @@ def getnewsfeed(count: Annotated[int, Form()], start_from: Annotated[int, Form()
     else:
         nf = get_api("Newsfeed.get", token=access_token, count=count, start_from=start_from)
     #open("nf.json", "w").write(dumps(nf, indent=4))
+    uids = []
+    gids = []
+    for i in nf['response']['items']:
+        author_id = i['from_id']
+        if author_id < 0:
+            author_id = 0 - author_id
+            if not (author_id in gids): gids.append(str(author_id))
+        else:
+            if not (author_id in uids): uids.append(str(author_id))
+    users = get_api("users.get", access_token, user_ids=",".join(uids), fields="photo_50,sex,photo_100,last_seen")
+    groups = get_api("groups.getById", access_token, group_ids=",".join(gids), fields="photo_50,verified,photo_100")
+    nf['response']['profiles'] = users['response']
+    nf['response']['groups'] = groups['response']
     return nf
 
 app.include_router(methods)
