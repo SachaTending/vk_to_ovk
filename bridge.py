@@ -1,5 +1,5 @@
 """
-    VK to OpenVK bridge version 0.0.8
+    VK to OpenVK bridge version 0.0.9
     Copyright (C) 2024  TendingStream73
 
     This program is free software: you can redistribute it and/or modify
@@ -29,6 +29,14 @@ from os import urandom
 from base64 import b64encode
 
 INSTANCE_DIVIDER = ":"
+
+# Таблица размеров newsfeed(когда фикс?)
+
+sizes = {
+    "s": (75,38),
+    "m": (130, 67),
+    "o": () # TODO: А точно размеры статичиские?
+}
 
 app = FastAPI()
 methods = APIRouter(prefix="/method")
@@ -251,7 +259,30 @@ def getnewsfeed(count: Annotated[int, Form()], start_from: Annotated[int, Form()
             nf['response']['groups'] = groups['response']
         except:
             nf["response"]['groups'] = get_api("groups.getById", access_token, groups_id=",".join(gids), fields="photo_50,verified,photo_100")['response']
+    
+    # Newsfeed fix(TEMPRORARY)
+    nf['response']['items']: list
+    for i in range(len(nf['response']['items'])):
+        for att in range(len(nf['response']['items'][i]['attachments'])):
+            ind = nf['response']['items'][i]['attachments'][att]['type']
+            if ind in ('photo'):
+                for _ in range(10):
+                    for ai in range(len(nf['response']['items'][i]['attachments'][att][ind]['sizes'])):
+                        #print(ai)
+                        try:
+                            nf['response']['items'][i]['attachments'][att][ind]['sizes'][ai]['src'] = nf['response']['items'][i]['attachments'][att][ind]['sizes'][ai]['url']
+                            if (nf['response']['items'][i]['attachments'][att][ind]['sizes'][ai]['width'] == None) or (nf['response']['items'][i]['attachments'][att][ind]['sizes'][ai]['height'] == None):
+                                del nf['response']['items'][i]['attachments'][att][ind]['sizes'][ai]
+                                pass
+                        except: pass
+            #nf['response']['items'][i]['attachments'][i['attachments'].index(att)] = att
+            #print(nf['response']['items'][i]['attachments'][att])
+    
     return nf
+
+@methods.post("/execute.getCountersAndInfo")
+async def getCountersAndInfo(access_token: Annotated[str, Form()]):
+    return get_api("account.getCounters", access_token)
 
 app.include_router(methods)
 
